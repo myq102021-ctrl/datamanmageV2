@@ -151,12 +151,18 @@ export const DataSmartMapMarketPanel: React.FC<{ marketTree: MarketNode[], setMa
     setLayerVisibility(prev => ({ ...prev, [id]: prev[id] !== true }));
   };
   const [activeTagName, setActiveTagName] = useState('全部');
+  const [sceneSearchQuery, setSceneSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'grid' | 'earth'>('earth');
 
   const filteredImagery = useMemo(() => {
-    if (activeTagName === '全部') return MOCK_IMAGERY;
-    return MOCK_IMAGERY.filter(tile => tile.tags.includes(activeTagName));
-  }, [activeTagName]);
+    const q = sceneSearchQuery.trim().toLowerCase();
+    return MOCK_IMAGERY.filter(tile => {
+      if (activeTagName !== '全部' && !tile.tags.includes(activeTagName)) return false;
+      if (!q) return true;
+      const haystack = `${tile.title} ${tile.description} ${(tile.tags || []).join(' ')}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [activeTagName, sceneSearchQuery]);
 
   // Map state for earth view
   const [currentZoom, setCurrentZoom] = useState(5);
@@ -423,6 +429,27 @@ export const DataSmartMapMarketPanel: React.FC<{ marketTree: MarketNode[], setMa
 
           {/* 上下布局：参考地图场景设计-图层列表 */}
           <div className="flex-1 flex flex-col overflow-hidden border-t border-slate-100 min-h-0">
+            {/* 场景搜索 - 搜索的是场景（名称/描述/标签） */}
+            <div className="px-3 py-3 border-b border-slate-100 bg-white">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={sceneSearchQuery}
+                  onChange={(e) => setSceneSearchQuery(e.target.value)}
+                  placeholder="搜索场景名称 / 描述 / 标签..."
+                  className="w-full h-9 pl-9 pr-9 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all"
+                />
+                {sceneSearchQuery && (
+                  <button
+                    onClick={() => setSceneSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-slate-500 hover:bg-white rounded-lg transition-all"
+                    title="清空"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
             {/* 1. 图层目录 - 上方 */}
             <div className="flex flex-col flex-1 min-h-0 border-b border-slate-100">
               <div className="px-4 py-2.5 flex items-center justify-between bg-slate-50/50 border-b border-slate-100 flex-shrink-0">

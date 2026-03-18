@@ -11,6 +11,12 @@ export const BASE_MAPS: BaseMapOption[] = [
     { id: 'roadmap', label: '地图', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
     { id: 'satellite', label: '地球', thumb: 'https://www.google.com/maps/vt?lyrs=s@189&gl=cn&x=26&y=13&z=5' },
     { id: 'hybrid', label: '全景', thumb: 'https://www.google.com/maps/vt?lyrs=y@189&gl=cn&x=26&y=13&z=5' },
+    { id: 'tianditu_vec', label: '天地图', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
+    { id: 'tianditu_img', label: '天地图影像', thumb: 'https://www.google.com/maps/vt?lyrs=s@189&gl=cn&x=26&y=13&z=5' },
+    { id: 'tianditu_street', label: '天地图街景', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
+    { id: 'baidu_vec', label: '百度地图', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
+    { id: 'baidu_img', label: '百度影像', thumb: 'https://www.google.com/maps/vt?lyrs=s@189&gl=cn&x=26&y=13&z=5' },
+    { id: 'baidu_street', label: '百度街景', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
 ];
 
 interface MiniBaseMapSwitcherProps {

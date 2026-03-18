@@ -227,6 +227,80 @@ interface MapScene {
     legends?: LayerLegendGroup[];
 }
 
+// --- Scene thumbnail snapshot (layers only) ---
+const getVisibleLayerLabelsFromTree = (nodes: LayerNode[] | undefined): string[] => {
+    if (!nodes) return [];
+    const labels: string[] = [];
+    const walk = (arr: LayerNode[]) => {
+        arr.forEach(n => {
+            if (n.type === 'layer' && n.isVisible !== false) labels.push(n.label);
+            if (n.children) walk(n.children);
+        });
+    };
+    walk(nodes);
+    return labels;
+};
+
+const buildLayersOnlySnapshotDataUrl = (layerLabels: string[]): string => {
+    // A lightweight SVG snapshot so we don't need extra dependencies.
+    // Only depicts layers (no UI), suitable for dashboard thumbnails.
+    const w = 640;
+    const h = 360;
+    const hasLandcover = layerLabels.some(l => l.includes('地表覆盖') || l.includes('土地利用'));
+    const hasRiver = layerLabels.some(l => l.includes('水网') || l.includes('河') || l.includes('湖'));
+
+    const chips = layerLabels.slice(0, 6).map((l, i) => {
+        const x = 18 + (i % 3) * 200;
+        const y = 18 + Math.floor(i / 3) * 34;
+        return `<g>
+  <rect x="${x}" y="${y}" rx="10" ry="10" width="180" height="26" fill="rgba(255,255,255,0.85)" stroke="rgba(148,163,184,0.35)" />
+  <text x="${x + 12}" y="${y + 17}" font-size="12" font-weight="700" fill="#334155">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</text>
+</g>`;
+    }).join('');
+
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#172554"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#bg)"/>
+  ${hasLandcover ? `
+  <g filter="url(#soft)">
+    <path d="M110 210 C160 120, 300 90, 400 140 C470 175, 520 260, 460 300 C380 355, 210 330, 140 285 C100 260, 85 235, 110 210 Z"
+          fill="rgba(16,185,129,0.28)" stroke="rgba(16,185,129,0.65)" stroke-width="2"/>
+    ${Array.from({ length: 14 }).map((_, i) => {
+        const x = 220 + (i % 7) * 32;
+        const y = 160 + Math.floor(i / 7) * 28;
+        const colors = ['rgba(16,185,129,0.65)','rgba(245,158,11,0.65)','rgba(59,130,246,0.65)','rgba(244,63,94,0.65)','rgba(100,116,139,0.65)','rgba(139,92,246,0.65)'];
+        const c = colors[i % colors.length];
+        return `<rect x="${x}" y="${y}" width="26" height="22" rx="4" fill="${c}" opacity="0.75"/>`;
+    }).join('')}
+  </g>` : ''}
+  ${hasRiver ? `
+  <path d="M60 250 C140 210, 210 280, 290 240 C360 205, 420 250, 510 220 C560 204, 600 220, 620 210"
+        fill="none" stroke="rgba(59,130,246,0.75)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M80 255 C150 225, 220 285, 300 250 C380 220, 430 260, 520 235"
+        fill="none" stroke="rgba(96,165,250,0.75)" stroke-width="5" stroke-linecap="round" opacity="0.85"/>` : ''}
+  <g>${chips}</g>
+  ${layerLabels.length > 6 ? `<text x="18" y="${h - 20}" font-size="12" font-weight="700" fill="rgba(226,232,240,0.75)">+${layerLabels.length - 6} more…</text>` : ''}
+</svg>`;
+
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+};
+
+const getSceneLayersOnlyThumbnail = (scene: MapScene): string => {
+    const labels = getVisibleLayerLabelsFromTree(scene.layerTree);
+    // If scene has no layerTree, fall back to existing thumbnail.
+    if (!labels.length) return scene.thumbnail;
+    return buildLayersOnlySnapshotDataUrl(labels);
+};
+
 const INITIAL_SCENES: MapScene[] = [
     {
         id: '1',
@@ -457,6 +531,16 @@ interface DashboardProps {
 
 const SmartMapDashboard: React.FC<DashboardProps> = ({ scenes, onCreate, onDesign, onPublish, onEdit, onDelete, onPreview }) => {
     const [searchQuery, setSearchQuery] = useState('');
+    const filteredScenes = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase();
+        if (!q) return scenes;
+        return scenes.filter(scene => {
+            const title = (scene.title || '').toLowerCase();
+            const desc = (scene.description || '').toLowerCase();
+            const tags = (scene.tags || []).join(' ').toLowerCase();
+            return title.includes(q) || desc.includes(q) || tags.includes(q);
+        });
+    }, [scenes, searchQuery]);
 
     return (
         <div className="flex-1 flex flex-col h-full bg-[#f4f7f9] animate-fadeIn overflow-y-auto text-slate-800">
@@ -510,10 +594,10 @@ const SmartMapDashboard: React.FC<DashboardProps> = ({ scenes, onCreate, onDesig
                         </div>
                     </div>
 
-                    {scenes.map((scene) => (
+                    {filteredScenes.map((scene) => (
                         <div key={scene.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col h-[280px] group/card">
                             <div className="h-32 relative bg-slate-100 overflow-hidden">
-                                <img src={scene.thumbnail} alt={scene.title} className="w-full h-full object-cover grayscale opacity-80 group-hover/card:scale-105 transition-transform duration-500" />
+                                <img src={getSceneLayersOnlyThumbnail(scene)} alt={scene.title} className="w-full h-full object-cover opacity-95 group-hover/card:scale-105 transition-transform duration-500" />
                                 <div className="absolute top-2 right-2">
                                     {scene.status === 'published' ? (
                                         <span className="px-2 py-0.5 bg-blue-600 text-white text-[10px] font-black rounded-md shadow-sm border border-white/20 flex items-center gap-1 animate-fadeIn">
@@ -559,6 +643,12 @@ const SmartMapDashboard: React.FC<DashboardProps> = ({ scenes, onCreate, onDesig
                         </div>
                     ))}
                 </div>
+                {filteredScenes.length === 0 && (
+                    <div className="py-16 text-center text-slate-400">
+                        <div className="text-sm font-bold">未找到匹配的场景</div>
+                        <div className="text-xs font-medium mt-2">可按场景名称、标签或描述进行搜索</div>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -695,6 +785,7 @@ const SmartMapEditor: React.FC<{
     const [isAddServiceModalOpen, setIsAddServiceModalOpen] = useState(false);
     const [isImportDataModalOpen, setIsImportDataModalOpen] = useState(false);
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+    const [metadataModal, setMetadataModal] = useState<{ title: string; items: { label: string; value: React.ReactNode }[] } | null>(null);
     // 当前选中的节点（目录或图层）
     const [selectedFolderId, setSelectedFolderId] = useState<string>('root-all');
     // 当前标绘要素默认保存的目录（初始为全部图层目录根）
@@ -1189,7 +1280,7 @@ const SmartMapEditor: React.FC<{
                 id: `draft-${Date.now()}`,
                 title: `草稿-未命名场景-${new Date().toLocaleDateString()}`,
                 description: '这是您在设计器中自动保存的草稿。',
-                thumbnail: 'https://images.unsplash.com/photo-1614730321146-b6fa6a46bcb4?auto=format&fit=crop&w=600&q=80',
+                thumbnail: buildLayersOnlySnapshotDataUrl(getVisibleLayerLabelsFromTree(layerTree)),
                 tags: ['自动保存', '草稿'],
                 isFavorite: false,
                 status: 'draft',
@@ -1200,12 +1291,12 @@ const SmartMapEditor: React.FC<{
         setIsExitConfirmOpen(false);
     };
 
-    const handlePublishToMarket = (data: { name: string; theme: string; tags: string[] }) => {
+    const handlePublishToMarket = (data: { name: string; theme: string; description: string; tags: string[] }) => {
         const publishedScene: MapScene = {
             id: `pub-${Date.now()}`,
             title: data.name,
-            description: `从编辑器发布到集市的场景，主题：${data.theme}。`,
-            thumbnail: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=600&q=80',
+            description: data.description?.trim() ? data.description.trim() : `从编辑器发布到集市的场景，主题：${data.theme}。`,
+            thumbnail: buildLayersOnlySnapshotDataUrl(getVisibleLayerLabelsFromTree(layerTree)),
             tags: data.tags,
             isFavorite: false,
             status: 'published',
@@ -1919,6 +2010,21 @@ const SmartMapEditor: React.FC<{
                                             onCancelRenameFeature={handleCancelRenameFeature}
                                             onEditingFeatureNameChange={setEditingFeatureName}
                                             onDeleteFeature={handleDeleteFeature}
+                                            onOpenMetadata={(n) => {
+                                                const items: { label: string; value: React.ReactNode }[] = [
+                                                    { label: '名称', value: n.label },
+                                                    { label: 'ID', value: <span className="font-mono text-[12px] text-slate-600">{n.id}</span> },
+                                                    { label: '类型', value: n.layerSourceType === 'businessTable' ? '业务表数据' : '空间图层' },
+                                                ];
+                                                if (n.sourceId) items.push({ label: '来源ID', value: <span className="font-mono text-[12px] text-slate-600">{n.sourceId}</span> });
+                                                const svc = n.sourceId ? MOCK_SERVICES.find(s => s.id === n.sourceId) : undefined;
+                                                if (svc) {
+                                                    items.push({ label: '服务名称', value: svc.name });
+                                                    items.push({ label: '服务类型', value: svc.serviceType || svc.source });
+                                                    items.push({ label: '数据源', value: svc.source });
+                                                }
+                                                setMetadataModal({ title: '图层元数据', items });
+                                            }}
                                         />
                                     ))}
                                 </div>
@@ -1970,7 +2076,19 @@ const SmartMapEditor: React.FC<{
                                     </div>
                                     <div className="flex-1 overflow-y-auto custom-scrollbar p-2 bg-white">
                                         {filteredProducts.map(product => (
-                                            <DataProductItem key={product.id} product={product} />
+                                            <DataProductItem 
+                                                key={product.id} 
+                                                product={product} 
+                                                onOpenMetadata={(p) => {
+                                                    const items: { label: string; value: React.ReactNode }[] = [
+                                                        { label: '名称', value: p.name },
+                                                        { label: 'ID', value: <span className="font-mono text-[12px] text-slate-600">{p.id}</span> },
+                                                        { label: '类型', value: p.serviceType || p.source },
+                                                        { label: '来源', value: p.source },
+                                                    ];
+                                                    setMetadataModal({ title: '服务元数据', items });
+                                                }}
+                                            />
                                         ))}
                                     </div>
                                     {/* 已按需求移除“添加数据源”入口 */}
@@ -2676,9 +2794,12 @@ const SmartMapEditor: React.FC<{
                     {/* 卷帘对比插件 (独立外挂渲染) */}
                     {isSwipeActive && (
                         <MapSwipePlugin 
-                            visibleLayers={visibleLayerLabels} 
+                            visibleLayers={visibleLayers} 
                             onClose={() => setIsSwipeActive(false)} 
                             zoom={zoom}
+                            center={mapCenter}
+                            dimension={dimension}
+                            baseMapType={activeBaseMap}
                         />
                     )}
 
@@ -2739,6 +2860,14 @@ const SmartMapEditor: React.FC<{
                     }}
                 />
             )}
+
+            {metadataModal && (
+                <MetadataModal
+                    title={metadataModal.title}
+                    items={metadataModal.items}
+                    onClose={() => setMetadataModal(null)}
+                />
+            )}
         </div>
     );
 };
@@ -2792,12 +2921,13 @@ const ExitConfirmModal: React.FC<{
 
 const PublishModal: React.FC<{
     onClose: () => void;
-    onConfirm: (data: { name: string; theme: string; tags: string[] }) => void;
+    onConfirm: (data: { name: string; theme: string; description: string; tags: string[] }) => void;
     initialData?: MapScene;
     marketTree?: MarketNode[];
 }> = ({ onClose, onConfirm, initialData, marketTree = [] }) => {
     const [name, setName] = useState(initialData?.title || '');
     const [theme, setTheme] = useState(initialData?.theme || '');
+    const [description, setDescription] = useState(initialData?.description || '');
     const [tags, setTags] = useState<string[]>(initialData?.tags || []);
     const [tagInput, setTagInput] = useState('');
 
@@ -2839,6 +2969,15 @@ const PublishModal: React.FC<{
                         </select>
                     </div>
                     <div className="space-y-2">
+                        <label className="text-xs font-black text-slate-500 uppercase tracking-widest">场景描述</label>
+                        <textarea
+                            value={description}
+                            onChange={e => setDescription(e.target.value)}
+                            className="w-full min-h-[84px] px-4 py-3 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all text-xs font-bold text-slate-800 resize-none"
+                            placeholder="请输入场景描述，用于集市卡片展示"
+                        />
+                    </div>
+                    <div className="space-y-2">
                         <label className="text-xs font-black text-slate-500 uppercase tracking-widest">搜索标签</label>
                         <div className="flex flex-wrap gap-2 p-2 border border-slate-200 rounded-xl min-h-[44px]">
                             {tags.map(t => (
@@ -2857,7 +2996,7 @@ const PublishModal: React.FC<{
                 </div>
                 <div className="px-6 py-5 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
                     <button onClick={onClose} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-black hover:bg-slate-50 transition-all">取消</button>
-                    <button onClick={() => onConfirm({ name, theme, tags })} className="px-10 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all">确认发布</button>
+                    <button onClick={() => onConfirm({ name, theme, description, tags })} className="px-10 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all">确认发布</button>
                 </div>
             </div>
         </div>
@@ -3121,6 +3260,7 @@ const LayerTreeNodeItem: React.FC<{
     onCancelRenameFeature: () => void;
     onEditingFeatureNameChange: (name: string) => void;
     onDeleteFeature: (id: string) => void;
+    onOpenMetadata: (node: LayerNode) => void;
 }> = ({
     node,
     level,
@@ -3141,7 +3281,8 @@ const LayerTreeNodeItem: React.FC<{
     onCommitRenameFeature,
     onCancelRenameFeature,
     onEditingFeatureNameChange,
-    onDeleteFeature
+    onDeleteFeature,
+    onOpenMetadata
 }) => {
     const isSelected = selectedId === node.id;
     const hasChildren = node.children && node.children.length > 0;
@@ -3247,6 +3388,15 @@ const LayerTreeNodeItem: React.FC<{
                             {node.isVisible !== false ? <EyeIcon size={14} /> : <EyeOff size={14} />}
                         </button>
                     )}
+                    {node.type === 'layer' && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onOpenMetadata(node); }}
+                            className="p-1 hover:text-blue-600"
+                            title="查看元数据"
+                        >
+                            <Info size={14} />
+                        </button>
+                    )}
                     {node.type === 'folder' && (
                         <button onClick={(e) => { e.stopPropagation(); onAddClick(node.id); }} className="p-1 hover:text-blue-600" title="添加子目录">
                             <Plus size={14} />
@@ -3280,32 +3430,24 @@ const LayerTreeNodeItem: React.FC<{
                                         value={editingFeatureName}
                                         onChange={(e) => onEditingFeatureNameChange(e.target.value)}
                                         onClick={(e) => e.stopPropagation()}
+                                        onBlur={(e) => {
+                                            e.stopPropagation();
+                                            onCommitRenameFeature();
+                                        }}
                                         onKeyDown={(e) => {
-                                            if (e.key === 'Enter') onCommitRenameFeature();
-                                            if (e.key === 'Escape') onCancelRenameFeature();
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                onCommitRenameFeature();
+                                            }
+                                            if (e.key === 'Escape') {
+                                                e.preventDefault();
+                                                onCancelRenameFeature();
+                                            }
                                         }}
                                         className="flex-1 h-6 px-2 text-[11px] bg-white border border-blue-300 rounded outline-none focus:ring-4 focus:ring-blue-50"
                                         placeholder="输入名称"
                                         autoFocus
                                     />
-                                    <button
-                                        className="px-1 text-[10px] text-blue-600 hover:text-blue-700"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onCommitRenameFeature();
-                                        }}
-                                    >
-                                        保存
-                                    </button>
-                                    <button
-                                        className="px-1 text-[10px] text-slate-400 hover:text-slate-600"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onCancelRenameFeature();
-                                        }}
-                                    >
-                                        取消
-                                    </button>
                                 </>
                             ) : (
                                 <>
@@ -3358,13 +3500,14 @@ const LayerTreeNodeItem: React.FC<{
                     onCancelRenameFeature={onCancelRenameFeature}
                     onEditingFeatureNameChange={onEditingFeatureNameChange}
                     onDeleteFeature={onDeleteFeature}
+                    onOpenMetadata={onOpenMetadata}
                 />
             ))}
         </div>
     );
 };
 
-const DataProductItem: React.FC<{ product: DataProduct }> = ({ product }) => (
+const DataProductItem: React.FC<{ product: DataProduct; onOpenMetadata: (product: DataProduct) => void }> = ({ product, onOpenMetadata }) => (
     <div 
         draggable
         onDragStart={e => {
@@ -3395,6 +3538,14 @@ const DataProductItem: React.FC<{ product: DataProduct }> = ({ product }) => (
                 })()}
             </div>
         </div>
+        <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onOpenMetadata(product); }}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-white transition-all opacity-0 group-hover:opacity-100"
+            title="查看元数据"
+        >
+            <Info size={14} />
+        </button>
         <GripVertical size={14} className="text-slate-300 group-hover:text-blue-400" />
     </div>
 );
@@ -3495,6 +3646,12 @@ export const GoogleMapTileGrid: React.FC<{
     else if (type === 'terrain') lyrs = 'p';
     else if (type === 'elevation') lyrs = 't';
     else if (type === '3d_model') lyrs = 's,h';
+    else if (type === 'tianditu_vec') lyrs = 'm';
+    else if (type === 'tianditu_img') lyrs = 's';
+    else if (type === 'tianditu_street') lyrs = 'm';
+    else if (type === 'baidu_vec') lyrs = 'm';
+    else if (type === 'baidu_img') lyrs = 's';
+    else if (type === 'baidu_street') lyrs = 'm';
 
     return (
         <div 
@@ -3631,6 +3788,12 @@ const BaseMapListPanel: React.FC<{ activeId: string; onSelect: (id: string) => v
         { id: 'hybrid', label: '谷歌混合图层', thumb: 'https://www.google.com/maps/vt?lyrs=y@189&gl=cn&x=26&y=13&z=5' },
         { id: '3d_model', label: '谷歌三维模型图', thumb: 'https://www.google.com/maps/vt?lyrs=s,h@189&gl=cn&x=26&y=13&z=5' },
         { id: 'elevation', label: '谷歌高程图', thumb: 'https://www.google.com/maps/vt?lyrs=t@189&gl=cn&x=26&y=13&z=5' },
+        { id: 'tianditu_vec', label: '天地图电子地图', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
+        { id: 'tianditu_img', label: '天地图影像底图', thumb: 'https://www.google.com/maps/vt?lyrs=s@189&gl=cn&x=26&y=13&z=5' },
+        { id: 'tianditu_street', label: '天地图街景底图', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
+        { id: 'baidu_vec', label: '百度电子地图', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
+        { id: 'baidu_img', label: '百度影像底图', thumb: 'https://www.google.com/maps/vt?lyrs=s@189&gl=cn&x=26&y=13&z=5' },
+        { id: 'baidu_street', label: '百度街景底图', thumb: 'https://www.google.com/maps/vt?lyrs=m@189&gl=cn&x=26&y=13&z=5' },
     ];
     return (
         <div className="p-4 grid grid-cols-2 gap-3">
@@ -4528,6 +4691,36 @@ const FeatureAttributesPopup = ({ data, onClose }: { data: any, onClose: () => v
                 <AttributeRow label="面积" value={data.area} />
                 <AttributeRow label="分类" value={data.category} />
                 <AttributeRow label="更新时间" value={data.updateTime} />
+            </div>
+        </div>
+    );
+};
+
+const MetadataModal: React.FC<{
+    title: string;
+    items: { label: string; value: React.ReactNode }[];
+    onClose: () => void;
+}> = ({ title, items, onClose }) => {
+    return (
+        <div className="fixed inset-0 z-[350] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fadeIn p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-[520px] border border-slate-200 overflow-hidden animate-zoomIn">
+                <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                    <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+                        <Info size={18} className="text-blue-600" /> {title}
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={22} /></button>
+                </div>
+                <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                    {items.map((it, idx) => (
+                        <div key={idx} className="flex gap-4 py-2 border-b border-slate-50 last:border-b-0">
+                            <div className="w-24 text-[11px] font-black text-slate-400 uppercase tracking-widest shrink-0">{it.label}</div>
+                            <div className="flex-1 text-sm font-bold text-slate-700 break-words">{it.value}</div>
+                        </div>
+                    ))}
+                </div>
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                    <button onClick={onClose} className="px-6 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-black hover:bg-slate-50 transition-all">关闭</button>
+                </div>
             </div>
         </div>
     );
